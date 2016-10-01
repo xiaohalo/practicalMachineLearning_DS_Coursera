@@ -1,0 +1,120 @@
+---
+title: "Prediction of exercise manner using a random forest model"
+output: 
+  html_document:
+    keep_md: true
+---
+##Summary
+
+The goal of this project is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, to predict the manner in which they did the exercise. 
+
+The training data is downloaded from  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data is available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+More information is available from the website here: http://groupware.les.inf.puc-rio.br/har 
+
+The training data and test data are cleaned by removing the variables with 50% missing values in the training data. Also the columns not related to classe are removed.
+
+The cleaned training data is splitted into training data set and testing data set. A predictive model using random forest is develped. In the random forest model, ntree is set as 500. Another parameter mtry is tuned by using 5-folder cross validation.  The model is assessed by using the remaining testing data set. On the training and testing data, the accuracy of the model is greater than 0.995. 
+
+Finally, the model is applied to predict the classe of the download 20 test cases.
+
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(cache=TRUE)
+cachedata = TRUE
+```
+
+## Data processing
+```{r}
+suppressMessages(library(caret))
+```
+
+### Loading data 
+```{r data loading, cache = cachedata}  
+# load data to stormData
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+### Preprocessing the data
+```{r preprocessing, cache = cachedata}
+dim(training)
+dim(testing)
+table(training$classe)
+
+# remove variables with over 50% missing values in training data
+drops <- NULL
+for(i in names(training)){
+    if (mean(is.na(training[,i]))>0.5){
+        drops <- c(drops, i)
+    }
+}
+training <- training[, !(names(training) %in% drops)]
+testing <- testing[, !(names(testing) %in% drops)]
+
+mean(!complete.cases(training))
+
+# remove zero covariates
+drops <- nearZeroVar(training)
+
+training <- training[, -drops]
+testing <- testing[, -drops]
+
+mean(!complete.cases(testing)) 
+
+str(training)
+
+# remove index (X) and timestamp column
+drops <- grepl("^X|timestamp", names(training))
+training <- training[, !drops]
+testing <- testing[, !drops]
+```
+
+## Modeling
+
+### Splitting the data
+70% of the training data is splited into training data set. The remaining 30% is used as test data set.
+```{r splitting, cache = cachedata}
+set.seed(1) # For reproducibile purpose
+inTrain <- createDataPartition(training$classe, 
+                               p=0.70, list=FALSE)
+trainSet <- training[inTrain, ]
+testSet <- training[-inTrain, ]
+```
+
+### Predictive model
+
+A predictive model is developed using Random Forest algorithm, because Random Forest is accurate and can estimate the importance of the predictors. Typically mtry and ntree are two parameters which can be tuned by using train function in caret package. As shown from the help page of randomForest() function, mtry is number of variables randomly sampled as candidates at each split, and ntree is Number of trees to grow. In this model, ntree is set as 500, and 5-fold cross validation is used to tune mtry.
+
+```{r model training, cache = cachedata}
+set.seed(1)
+suppressMessages(
+    modRF <- train(classe ~ ., method="rf", data=trainSet,
+               trControl = trainControl(method="cv", number=5,
+                                        search="random"), 
+               tuneLength=5)
+)
+```
+
+```{r model assessment}
+modRF
+plot(modRF)
+modRF$finalModel$confusion
+modRF$finalModel$importance
+suppressMessages(predRF <- predict(modRF, testSet))
+confusionMatrix(testSet$classe, predRF)
+```
+The optimal value of mtry in the random forest model is 26. The accuracy of the model is 0.997 on the training data set. MeanDecreaseGini of the variables is listed. MeanDecreaseGini is a measure of variable importance based on the Gini impurity index used for the calculation of splits during training. From the list, we can see that top five important variables are user_namecarlitos, user_namecharles, user_nameeurico, user_namejeremy, and user_namepedro.
+
+The accuracy of the model on the test data set is 0.9995. As expected, the random forest model has very high accuracy.
+
+### Prediction of test cases
+
+Finally, we apply the model to predict the classe of the original test cases. Note that the last column in testing is not in training, and is not related to classe. Therefore, it is removed while making prediction.
+
+```{r prediction}
+classeTest <- predict(modRF, testing[, -55])
+classeTest
+```
